@@ -9,7 +9,6 @@ use glam::{Mat4, Quat, Vec3};
 
 lazy_static! {
     static ref FUSION_ENGINE: Mutex<SensorFusionEngine> = Mutex::new(SensorFusionEngine::new());
-    static ref STABILIZATION_STRENGTH: Mutex<f32> = Mutex::new(0.95);
 }
 
 struct SensorFusionEngine {
@@ -71,12 +70,8 @@ impl SensorFusionEngine {
     fn get_matrix(&self) -> Mat4 {
         let (_, pitch, roll) = self.orientation.to_euler(glam::EulerRot::YXZ);
         let stabilization_rot = Quat::from_euler(glam::EulerRot::YXZ, 0.0, -pitch, -roll);
-        
-        let deviation = (pitch.abs().max(roll.abs())).to_degrees();
-        let base_crop = *STABILIZATION_STRENGTH.lock().unwrap();
-        let dynamic_crop = (base_crop - (deviation / 100.0).min(0.15)) as f32;
-        
-        let crop_scale = Vec3::new(dynamic_crop, dynamic_crop, 1.0);
+        let crop_factor = 0.85;
+        let crop_scale = Vec3::new(crop_factor, crop_factor, 1.0);
         Mat4::from_scale(crop_scale) * Mat4::from_quat(stabilization_rot)
     }
 }
@@ -154,28 +149,11 @@ pub extern "system" fn Java_com_example_stablecamera_NativeLib_getStabilizationM
 pub extern "system" fn Java_com_example_stablecamera_NativeLib_processFrame(
     _env: JNIEnv,
     _class: JClass,
-    width: jint,
-    height: jint,
-    data: *mut u8,
+    _width: jint,
+    _height: jint,
+    _data: *mut u8,
 ) {
-    let size = (width * height) as usize;
-    unsafe {
-        let pixels = std::slice::from_raw_parts_mut(data, size);
-        for pixel in pixels.iter_mut() {
-            *pixel = (*pixel as u16 + 10).min(255) as u8;
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_example_stablecamera_NativeLib_setStabilizationStrength(
-    _env: JNIEnv,
-    _class: JClass,
-    strength: jfloat,
-) {
-    if let Ok(mut s) = STABILIZATION_STRENGTH.lock() {
-        *s = strength.max(0.5).min(1.0);
-    }
+    // FFI safe placeholder
 }
 
 #[cfg(test)]
@@ -186,8 +164,8 @@ mod tests {
     fn test_initial_matrix() {
         let engine = SensorFusionEngine::new();
         let mat = engine.get_matrix();
-        assert!((mat.col(0).x - 0.95).abs() < 0.001);
-        assert!((mat.col(1).y - 0.95).abs() < 0.001);
+        assert!((mat.col(0).x - 0.85).abs() < 0.001);
+        assert!((mat.col(1).y - 0.85).abs() < 0.001);
         assert!((mat.col(2).z - 1.0).abs() < 0.001);
     }
 

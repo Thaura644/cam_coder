@@ -36,10 +36,4 @@ class NativeLib {
      * Processes a camera frame (placeholder for future use).
      */
     external fun processFrame(width: Int, height: Int, data: ByteArray)
-
-    /**
-     * Sets the stabilization strength (crop factor).
-     * @param strength Value between 0.5 and 1.0
-     */
-    external fun setStabilizationStrength(strength: Float)
 }

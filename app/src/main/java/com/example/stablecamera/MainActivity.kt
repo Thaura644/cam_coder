@@ -30,13 +30,11 @@ import com.example.stablecamera.camera.CameraController
 import com.example.stablecamera.camera.StabilizationRenderer
 import com.example.stablecamera.ui.theme.StableCameraTheme
 import com.example.stablecamera.privacy.PrivacyFilterService
-import com.example.stablecamera.privacy.AppUsageMonitor
 
 class MainActivity : ComponentActivity() {
     private val nativeLib = NativeLib()
     private lateinit var sensorFusionManager: SensorFusionManager
     private lateinit var cameraController: CameraController
-    private lateinit var appUsageMonitor: AppUsageMonitor
     private var stabilizationRenderer: StabilizationRenderer? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
@@ -50,8 +48,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sensorFusionManager = SensorFusionManager(this, nativeLib)
-        cameraController = CameraController(this, this, nativeLib)
-        appUsageMonitor = AppUsageMonitor(this)
+        cameraController = CameraController(this)
 
         setContent {
             StableCameraTheme {
@@ -107,14 +104,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         sensorFusionManager.start()
-        appUsageMonitor.start()
         checkAndRequestPermissions()
     }
 
     override fun onPause() {
         super.onPause()
         sensorFusionManager.stop()
-        appUsageMonitor.stop()
         cameraController.close()
     }
 
@@ -134,45 +129,9 @@ fun CameraScreen(
 ) {
     var isSuperSteadyEnabled by remember { mutableStateOf(true) }
     var isPrivacyFilterEnabled by remember { mutableStateOf(false) }
-    var isRecording by remember { mutableStateOf(false) }
-    var showProMode by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
-    var zoomValue by remember { mutableStateOf(1f) }
-    var stabilizationStrength by remember { mutableStateOf(0.95f) }
-    var frameProcessingEnabled by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         checkPermissions()
-    }
-
-    LaunchedEffect(frameProcessingEnabled) {
-        cameraController.setFrameProcessingEnabled(frameProcessingEnabled)
-    }
-
-    if (showSettings) {
-        AlertDialog(
-            onDismissRequest = { showSettings = false },
-            title = { Text("Camera Settings") },
-            text = {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Stabilization Strength")
-                        Slider(
-                            value = stabilizationStrength,
-                            onValueChange = { stabilizationStrength = it },
-                            valueRange = 0.5f..1f
-                        )
-                    }
-                    Text("Privacy Filter: ${if (isPrivacyFilterEnabled) "Active" else "Inactive"}")
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    nativeLib.setStabilizationStrength(stabilizationStrength)
-                    showSettings = false
-                }) { Text("OK") }
-            }
-        )
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -214,78 +173,14 @@ fun CameraScreen(
                     },
                     label = { Text("Privacy Filter", color = if (isPrivacyFilterEnabled) Color.Black else Color.White) }
                 )
-                FilterChip(
-                    selected = frameProcessingEnabled,
-                    onClick = { frameProcessingEnabled = !frameProcessingEnabled },
-                    label = { Text("Frame Filter", color = if (frameProcessingEnabled) Color.Black else Color.White) }
-                )
             }
 
-            FloatingActionButton(
-                onClick = {
-                    if (isRecording) {
-                        cameraController.toggleRecording(
-                            onStarted = { isRecording = false },
-                            onStopped = { isRecording = false }
-                        )
-                    } else {
-                        cameraController.toggleRecording(
-                            onStarted = { isRecording = true },
-                            onStopped = { isRecording = false }
-                        )
-                    }
-                },
-                containerColor = if (isRecording) Color.Red else Color.White
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = if (isRecording) "Stop Recording" else "Record",
-                    tint = Color.Black
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            FloatingActionButton(
-                onClick = { cameraController.takePhoto { } },
-                containerColor = Color.White,
-                modifier = Modifier.size(80.dp)
-            ) {
-                Box(modifier = Modifier.size(60.dp))
-            }
-
-            if (showProMode) {
-                ProModePanel(
-                    onZoomChange = { zoom ->
-                        zoomValue = zoom
-                        cameraController.setZoom(zoom)
-                    },
-                    currentZoom = zoomValue
-                )
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp),
-            horizontalAlignment = Alignment.End
-        ) {
-            if (showProMode) {
-                Text("PRO MODE", color = Color.Yellow, modifier = Modifier.padding(bottom = 8.dp))
-            }
-            Row {
-                IconButton(onClick = { showProMode = !showProMode }) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Pro Mode",
-                        tint = if (showProMode) Color.Yellow else Color.White
-                    )
-                }
-                IconButton(onClick = { showSettings = true }) {
-                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
-                }
-            }
+            Button(
+                onClick = { /* Capture Logic */ },
+                modifier = Modifier.size(80.dp),
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+            ) { }
         }
 
         IconButton(
@@ -294,23 +189,14 @@ fun CameraScreen(
         ) {
             Icon(imageVector = Icons.Default.Check, contentDescription = "Refresh Permissions", tint = Color.White)
         }
-    }
-}
-
-@Composable
-fun ProModePanel(onZoomChange: (Float) -> Unit, currentZoom: Float) {
-    Surface(
-        color = Color.Black.copy(alpha = 0.7f),
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.padding(horizontal = 16.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text("ZOOM: ${String.format("%.1f", currentZoom)}x", color = Color.White)
-            Slider(
-                value = currentZoom,
-                onValueChange = onZoomChange,
-                valueRange = 1f..10f,
-                modifier = Modifier.width(200.dp)
+        IconButton(
+            onClick = { /* Settings Logic */ },
+            modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Settings",
+                tint = Color.White
             )
         }
     }
