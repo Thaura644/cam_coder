@@ -26,9 +26,18 @@ impl SensorFusionEngine {
         }
     }
 
+    fn validate_input(val: f32) -> bool {
+        val.is_finite()
+    }
+
     fn update_gyro(&mut self, timestamp: jlong, x: f32, y: f32, z: f32) {
+        if !Self::validate_input(x) || !Self::validate_input(y) || !Self::validate_input(z) {
+            return;
+        }
+
         if self.last_gyro_timestamp > 0 {
             let dt = (timestamp - self.last_gyro_timestamp) as f32 / 1_000_000_000.0;
+            // Limit dt to a reasonable range (max 100ms) to avoid jumps after backgrounding
             if dt > 0.0 && dt < 1.1 {
                 let rotation_vector = Vec3::new(x, y, z) * dt;
                 let angle = rotation_vector.length();
@@ -43,7 +52,15 @@ impl SensorFusionEngine {
     }
 
     fn update_accel(&mut self, _timestamp: jlong, ax: f32, ay: f32, az: f32) {
-        let _gravity = Vec3::new(ax, ay, az).normalize();
+        if !Self::validate_input(ax) || !Self::validate_input(ay) || !Self::validate_input(az) {
+            return;
+        }
+
+        let mag_sq = ax*ax + ay*ay + az*az;
+        if mag_sq < 0.01 || mag_sq > 400.0 { // Filter extreme acceleration or zero-gravity
+            return;
+        }
+
         let roll = ay.atan2(ax) - std::f32::consts::PI / 2.0;
         let pitch = az.atan2((ax*ax + ay*ay).sqrt());
         let accel_orientation = Quat::from_euler(glam::EulerRot::YXZ, 0.0, pitch, roll);
@@ -67,8 +84,9 @@ pub extern "system" fn Java_com_example_stablecamera_NativeLib_initSensorFusion(
     android_logger::init_once(
         Config::default().with_max_level(LevelFilter::Trace),
     );
-    let mut engine = FUSION_ENGINE.lock().unwrap();
-    *engine = SensorFusionEngine::new();
+    if let Ok(mut engine) = FUSION_ENGINE.lock() {
+        *engine = SensorFusionEngine::new();
+    }
 }
 
 #[no_mangle]
@@ -105,15 +123,26 @@ pub extern "system" fn Java_com_example_stablecamera_NativeLib_getStabilizationM
     _class: JClass,
     _timestamp: jlong,
 ) -> jfloatArray {
-    let array = if let Ok(engine) = FUSION_ENGINE.lock() {
+    let mat_array = if let Ok(engine) = FUSION_ENGINE.lock() {
         engine.get_matrix().to_cols_array()
     } else {
         Mat4::IDENTITY.to_cols_array()
     };
 
-    let output = env.new_float_array(16).unwrap();
-    env.set_float_array_region(&output, 0, &array).unwrap();
-    output.into_raw()
+    match env.new_float_array(16) {
+        Ok(output) => {
+            if let Err(e) = env.set_float_array_region(&output, 0, &mat_array) {
+                log::error!("Failed to set float array region: {:?}", e);
+                std::ptr::null_mut()
+            } else {
+                output.into_raw()
+            }
+        }
+        Err(e) => {
+            log::error!("Failed to create new float array: {:?}", e);
+            std::ptr::null_mut()
+        }
+    }
 }
 
 #[no_mangle]
@@ -122,8 +151,9 @@ pub extern "system" fn Java_com_example_stablecamera_NativeLib_processFrame(
     _class: JClass,
     _width: jint,
     _height: jint,
-    _data: *mut u8, // Use raw pointer for FFI safety
+    _data: *mut u8,
 ) {
+    // FFI safe placeholder
 }
 
 #[cfg(test)]
@@ -146,7 +176,14 @@ mod tests {
         engine.update_gyro(1_000_000_001, 0.0, 0.0, std::f32::consts::PI);
 
         let (_, _, roll) = engine.orientation.to_euler(glam::EulerRot::YXZ);
-        println!("Roll: {}", roll);
         assert!((roll.abs() - std::f32::consts::PI).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_invalid_input() {
+        let mut engine = SensorFusionEngine::new();
+        engine.update_gyro(1, 0.0, 0.0, std::f32::NAN);
+        engine.update_gyro(1_000_000_001, 0.0, 0.0, 1.0);
+        assert_eq!(engine.orientation, Quat::IDENTITY);
     }
 }

@@ -4,7 +4,6 @@ import android.graphics.SurfaceTexture
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
-import android.opengl.Matrix
 import com.example.stablecamera.NativeLib
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -23,6 +22,7 @@ class StabilizationRenderer(private val nativeLib: NativeLib) : GLSurfaceView.Re
     private var aTextureCoordLoc = -1
 
     private val stMatrix = FloatArray(16)
+    @Volatile
     private var frameAvailable = false
 
     var onSurfaceTextureAvailable: ((SurfaceTexture) -> Unit)? = null
@@ -50,17 +50,19 @@ class StabilizationRenderer(private val nativeLib: NativeLib) : GLSurfaceView.Re
     """.trimIndent()
 
     private val vertices = floatArrayOf(
-        -1.0f, -1.0f, 0f, 0f, 0f,
-         1.0f, -1.0f, 0f, 1f, 0f,
-        -1.0f,  1.0f, 0f, 0f, 1f,
-         1.0f,  1.0f, 0f, 1f, 1f
+        -1.0f, -1.0f, 0f, 0.0f, 0.0f,
+         1.0f, -1.0f, 0f, 1.0f, 0.0f,
+        -1.0f,  1.0f, 0f, 0.0f, 1.0f,
+         1.0f,  1.0f, 0f, 1.0f, 1.0f
     )
     private val vertexBuffer: FloatBuffer = ByteBuffer.allocateDirect(vertices.size * 4)
         .order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(vertices).position(0) }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         textureId = createExternalTexture()
-        surfaceTexture = SurfaceTexture(textureId).apply { setOnFrameAvailableListener(this@StabilizationRenderer) }
+        surfaceTexture = SurfaceTexture(textureId).apply {
+            setOnFrameAvailableListener(this@StabilizationRenderer)
+        }
         program = createProgram(vertexShaderCode, fragmentShaderCode)
 
         aPositionLoc = GLES20.glGetAttribLocation(program, "aPosition")
@@ -68,7 +70,7 @@ class StabilizationRenderer(private val nativeLib: NativeLib) : GLSurfaceView.Re
         uSTMatrixLoc = GLES20.glGetUniformLocation(program, "uSTMatrix")
         uStabMatrixLoc = GLES20.glGetUniformLocation(program, "uStabMatrix")
 
-        onSurfaceTextureAvailable?.invoke(surfaceTexture!!)
+        surfaceTexture?.let { onSurfaceTextureAvailable?.invoke(it) }
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -76,39 +78,60 @@ class StabilizationRenderer(private val nativeLib: NativeLib) : GLSurfaceView.Re
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        if (surfaceTexture == null) return
+
         synchronized(this) {
             if (frameAvailable) {
-                surfaceTexture?.updateTexImage()
-                surfaceTexture?.getTransformMatrix(stMatrix)
+                try {
+                    surfaceTexture?.updateTexImage()
+                    surfaceTexture?.getTransformMatrix(stMatrix)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
                 frameAvailable = false
             }
         }
 
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        GLES20.glUseProgram(program)
+        if (program != -1) {
+            GLES20.glUseProgram(program)
 
-        vertexBuffer.position(0)
-        GLES20.glVertexAttribPointer(aPositionLoc, 3, GLES20.GL_FLOAT, false, 20, vertexBuffer)
-        GLES20.glEnableVertexAttribArray(aPositionLoc)
+            vertexBuffer.position(0)
+            GLES20.glVertexAttribPointer(aPositionLoc, 3, GLES20.GL_FLOAT, false, 20, vertexBuffer)
+            GLES20.glEnableVertexAttribArray(aPositionLoc)
 
-        vertexBuffer.position(3)
-        GLES20.glVertexAttribPointer(aTextureCoordLoc, 2, GLES20.GL_FLOAT, false, 20, vertexBuffer)
-        GLES20.glEnableVertexAttribArray(aTextureCoordLoc)
+            vertexBuffer.position(3)
+            GLES20.glVertexAttribPointer(aTextureCoordLoc, 2, GLES20.GL_FLOAT, false, 20, vertexBuffer)
+            GLES20.glEnableVertexAttribArray(aTextureCoordLoc)
 
-        GLES20.glUniformMatrix4fv(uSTMatrixLoc, 1, false, stMatrix, 0)
+            GLES20.glUniformMatrix4fv(uSTMatrixLoc, 1, false, stMatrix, 0)
 
-        // Get stabilization matrix from Rust
-        val stabMatrix = nativeLib.getStabilizationMatrix(System.nanoTime())
-        GLES20.glUniformMatrix4fv(uStabMatrixLoc, 1, false, stabMatrix, 0)
+            // Get stabilization matrix from Rust
+            val stabMatrix = nativeLib.getStabilizationMatrix(System.nanoTime())
+            GLES20.glUniformMatrix4fv(uStabMatrixLoc, 1, false, stabMatrix, 0)
 
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
 
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        }
     }
 
     override fun onFrameAvailable(surfaceTexture: SurfaceTexture?) {
         synchronized(this) { frameAvailable = true }
+    }
+
+    fun release() {
+        if (textureId != -1) {
+            GLES20.glDeleteTextures(1, intArrayOf(textureId), 0)
+            textureId = -1
+        }
+        surfaceTexture?.release()
+        surfaceTexture = null
+        if (program != -1) {
+            GLES20.glDeleteProgram(program)
+            program = -1
+        }
     }
 
     private fun createExternalTexture(): Int {
@@ -125,17 +148,34 @@ class StabilizationRenderer(private val nativeLib: NativeLib) : GLSurfaceView.Re
     private fun createProgram(vSource: String, fSource: String): Int {
         val vShader = loadShader(GLES20.GL_VERTEX_SHADER, vSource)
         val fShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fSource)
-        return GLES20.glCreateProgram().apply {
+        if (vShader == 0 || fShader == 0) return -1
+
+        val p = GLES20.glCreateProgram().apply {
             GLES20.glAttachShader(this, vShader)
             GLES20.glAttachShader(this, fShader)
             GLES20.glLinkProgram(this)
         }
+
+        val linkStatus = IntArray(1)
+        GLES20.glGetProgramiv(p, GLES20.GL_LINK_STATUS, linkStatus, 0)
+        if (linkStatus[0] == 0) {
+            GLES20.glDeleteProgram(p)
+            return -1
+        }
+        return p
     }
 
     private fun loadShader(type: Int, source: String): Int {
-        return GLES20.glCreateShader(type).apply {
+        val s = GLES20.glCreateShader(type).apply {
             GLES20.glShaderSource(this, source)
             GLES20.glCompileShader(this)
         }
+        val compileStatus = IntArray(1)
+        GLES20.glGetShaderiv(s, GLES20.GL_COMPILE_STATUS, compileStatus, 0)
+        if (compileStatus[0] == 0) {
+            GLES20.glDeleteShader(s)
+            return 0
+        }
+        return s
     }
 }

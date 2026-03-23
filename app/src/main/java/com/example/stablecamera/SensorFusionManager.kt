@@ -13,8 +13,12 @@ class SensorFusionManager(context: Context, private val nativeLib: NativeLib) : 
 
     fun start() {
         nativeLib.initSensorFusion()
-        sensorManager.registerListener(this, gyro, SensorManager.SENSOR_DELAY_FASTEST)
-        sensorManager.registerListener(this, accel, SensorManager.SENSOR_DELAY_FASTEST)
+        gyro?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
+        }
+        accel?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST)
+        }
     }
 
     fun stop() {
@@ -22,6 +26,8 @@ class SensorFusionManager(context: Context, private val nativeLib: NativeLib) : 
     }
 
     override fun onSensorChanged(event: SensorEvent) {
+        if (event.values == null || event.values.size < 3) return
+
         when (event.sensor.type) {
             Sensor.TYPE_GYROSCOPE -> {
                 nativeLib.feedGyro(event.timestamp, event.values[0], event.values[1], event.values[2])
