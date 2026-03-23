@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<tools-keep xmlns:tools="http://schemas.android.com/tools">
+    <include domain="file" path="."/>
+</tools-keep>

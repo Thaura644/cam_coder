@@ -1,0 +1,9 @@
+.gradle/
+build/
+app/build/
+native/target/
+*.iml
+.idea/
+local.properties
+.DS_Store
+pre_commit_instructions.txt
