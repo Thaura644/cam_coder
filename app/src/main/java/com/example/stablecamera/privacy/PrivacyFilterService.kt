@@ -59,22 +59,6 @@ class PrivacyFilterService : Service() {
 
         overlayView = FrameLayout(this).apply {
             addView(PrivacyOverlayView(context))
-            // "Narrow Viewing Angle" effect: a vignette-like darkening
-            // For simplicity, we use a dark semi-transparent background with a center "hole"
-            // In a more advanced version, we'd use a custom view with a radial gradient
-            setBackgroundColor(Color.parseColor("#CC000000"))
-
-            // "Rainbow Lights" aesthetic indicator
-            val rainbowView = View(context).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    20,
-                    Gravity.TOP
-                )
-                // In a real app, we'd use an AnimatedVectorDrawable or a custom shader
-                setBackgroundColor(Color.MAGENTA)
-            }
-            addView(rainbowView)
         }
 
         windowManager?.addView(overlayView, params)

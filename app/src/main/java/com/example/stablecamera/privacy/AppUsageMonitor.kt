@@ -13,7 +13,15 @@ class AppUsageMonitor(private val context: Context) {
     private var lastAppPackage: String? = null
 
     // Set of packages that trigger the privacy filter
-    private var protectedPackages = setOf("com.example.bankapp", "com.android.settings")
+    private var protectedPackages = mutableSetOf("com.android.settings")
+
+    fun addProtectedPackage(packageName: String) {
+        protectedPackages.add(packageName)
+    }
+
+    fun removeProtectedPackage(packageName: String) {
+        protectedPackages.remove(packageName)
+    }
 
     private val monitorRunnable = object : Runnable {
         override fun run() {

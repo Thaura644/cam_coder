@@ -29,7 +29,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sensorFusionManager = SensorFusionManager(this, nativeLib)
-        cameraController = CameraController(this)
+        cameraController = CameraController(this, this)
 
         setContent {
             StableCameraTheme {
@@ -40,7 +40,11 @@ class MainActivity : ComponentActivity() {
                         val intent = Intent(this, PrivacyFilterService::class.java).apply {
                             action = if (enabled) PrivacyFilterService.ACTION_SHOW else PrivacyFilterService.ACTION_HIDE
                         }
-                        startService(intent)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
                     }
                 )
             }
@@ -68,68 +72,59 @@ fun CameraScreen(
 ) {
     var isSuperSteadyEnabled by remember { mutableStateOf(true) }
     var isPrivacyFilterEnabled by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var showProMode by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var zoomValue by remember { mutableStateOf(1f) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Camera Preview with Stabilization
-        AndroidView(
-            factory = { context ->
-                GLSurfaceView(context).apply {
-                    setEGLContextClientVersion(2)
-                    val renderer = StabilizationRenderer(nativeLib)
-                    renderer.onSurfaceTextureAvailable = { surfaceTexture ->
-                        cameraController.openCamera(surfaceTexture)
+    if (showSettings) {
+        AlertDialog(
+            onDismissRequest = { showSettings = false },
+            title = { Text("Camera Settings") },
+            text = {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Stabilization Strength")
+                        Slider(value = 0.85f, onValueChange = {}, valueRange = 0.5f..1f)
                     }
-                    setRenderer(renderer)
+                    Text("Privacy Filter: ${if (isPrivacyFilterEnabled) "Active" else "Inactive"}")
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            confirmButton = {
+                TextButton(onClick = { showSettings = false }) { Text("OK") }
+            }
         )
+    }
 
-        // UI Controls
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ... (rest of the code)
+        
+        // Settings / Pro Controls Toggle
+        Column(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+            IconButton(
+                onClick = { showSettings = true },
             ) {
-                FilterChip(
-                    selected = isSuperSteadyEnabled,
-                    onClick = { isSuperSteadyEnabled = !isSuperSteadyEnabled },
-                    label = { Text("Super Steady", color = if (isSuperSteadyEnabled) Color.Black else Color.White) }
-                )
-                FilterChip(
-                    selected = isPrivacyFilterEnabled,
-                    onClick = {
-                        isPrivacyFilterEnabled = !isPrivacyFilterEnabled
-                        onTogglePrivacy(isPrivacyFilterEnabled)
-                    },
-                    label = { Text("Privacy Filter", color = if (isPrivacyFilterEnabled) Color.Black else Color.White) }
-                )
+                Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
             }
-
-            Button(
-                onClick = { /* Capture Logic */ },
-                modifier = Modifier.size(80.dp),
-                shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White)
-            ) {
-                // Shutter button center
-            }
+            // ...
         }
+    }
+}
 
-        // Settings / Pro Controls
-        IconButton(
-            onClick = { /* Settings Logic */ },
-            modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Settings",
-                tint = Color.White
+@Composable
+fun ProModePanel(onZoomChange: (Float) -> Unit, currentZoom: Float) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.7f),
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.padding(horizontal = 16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("ZOOM: ${String.format("%.1f", currentZoom)}x", color = Color.White)
+            Slider(
+                value = currentZoom,
+                onValueChange = onZoomChange,
+                valueRange = 1f..10f,
+                modifier = Modifier.width(200.dp)
             )
         }
     }

@@ -29,10 +29,13 @@ impl SensorFusionEngine {
     fn update_gyro(&mut self, timestamp: jlong, x: f32, y: f32, z: f32) {
         if self.last_gyro_timestamp > 0 {
             let dt = (timestamp - self.last_gyro_timestamp) as f32 / 1_000_000_000.0;
-            if dt > 0.0 && dt < 1.1 {
+            // Filter out outliers or large gaps
+            if dt > 0.0 && dt < 0.1 {
+                // Gyro vector is in radians/s. Multiply by dt to get incremental rotation.
+                // Note: Android coordinates (x: right, y: up, z: out)
                 let rotation_vector = Vec3::new(x, y, z) * dt;
                 let angle = rotation_vector.length();
-                if angle > 0.0001 {
+                if angle > 0.00001 {
                     let axis = rotation_vector / angle;
                     let incremental_rotation = Quat::from_axis_angle(axis, angle);
                     self.orientation = (self.orientation * incremental_rotation).normalize();
@@ -43,18 +46,38 @@ impl SensorFusionEngine {
     }
 
     fn update_accel(&mut self, _timestamp: jlong, ax: f32, ay: f32, az: f32) {
-        let _gravity = Vec3::new(ax, ay, az).normalize();
-        let roll = ay.atan2(ax) - std::f32::consts::PI / 2.0;
-        let pitch = az.atan2((ax*ax + ay*ay).sqrt());
+        let gravity = Vec3::new(ax, ay, az);
+        if gravity.length() < 0.1 { return; }
+        let gravity = gravity.normalize();
+
+        // Calculate pitch and roll from gravity vector
+        // roll = atan2(x, sqrt(y^2 + z^2))
+        // pitch = atan2(-y, z)
+        let roll = ax.atan2((ay * ay + az * az).sqrt());
+        let pitch = (-ay).atan2(az);
+
+        // This gives us the rotation needed to align the device with gravity
         let accel_orientation = Quat::from_euler(glam::EulerRot::YXZ, 0.0, pitch, roll);
+        
+        // Complementary filter: adjust the gyro-integrated orientation towards the accel-based tilt
         self.orientation = self.orientation.slerp(accel_orientation, 1.0 - self.alpha).normalize();
     }
 
     fn get_matrix(&self) -> Mat4 {
+        // We want to counteract the current orientation to keep the image "level"
         let (_, pitch, roll) = self.orientation.to_euler(glam::EulerRot::YXZ);
+        
+        // Stabilization rotation is the inverse of the current tilt
         let stabilization_rot = Quat::from_euler(glam::EulerRot::YXZ, 0.0, -pitch, -roll);
-        let crop_factor = 0.85;
-        let crop_scale = Vec3::new(crop_factor, crop_factor, 1.0);
+        
+        // Dynamic crop: calculate how much we've deviated from center
+        // The more we rotate, the more "black borders" would appear without cropping.
+        // For a 90% crop, we can handle ~15-20 degrees of tilt.
+        let deviation = (pitch.abs().max(roll.abs())).to_degrees();
+        let base_crop = 0.95;
+        let dynamic_crop = (base_crop - (deviation / 100.0).min(0.15)) as f32;
+        
+        let crop_scale = Vec3::new(dynamic_crop, dynamic_crop, 1.0);
         Mat4::from_scale(crop_scale) * Mat4::from_quat(stabilization_rot)
     }
 }
@@ -120,10 +143,22 @@ pub extern "system" fn Java_com_example_stablecamera_NativeLib_getStabilizationM
 pub extern "system" fn Java_com_example_stablecamera_NativeLib_processFrame(
     _env: JNIEnv,
     _class: JClass,
-    _width: jint,
-    _height: jint,
-    _data: *mut u8, // Use raw pointer for FFI safety
+    width: jint,
+    height: jint,
+    data: *mut u8,
 ) {
+    // Basic Grayscale Filter implementation for NV21/YUV_420_888 (just process the Y plane)
+    // The Y plane is the first width * height bytes.
+    let size = (width * height) as usize;
+    unsafe {
+        let pixels = std::slice::from_raw_parts_mut(data, size);
+        for pixel in pixels.iter_mut() {
+            // In a real app, we might do more complex processing here, 
+            // but for now, we'll just demonstrate writing to the buffer.
+            // Let's slightly increase brightness as a "filter"
+            *pixel = (*pixel as u16 + 10).min(255) as u8;
+        }
+    }
 }
 
 #[cfg(test)]
