@@ -74,7 +74,7 @@ fun CameraScreen(
     var isPrivacyFilterEnabled by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var showProMode by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
+    var stabilizationStrength by remember { mutableStateOf(0.95f) }
     var zoomValue by remember { mutableStateOf(1f) }
 
     if (showSettings) {
@@ -85,7 +85,14 @@ fun CameraScreen(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Stabilization Strength")
-                        Slider(value = 0.85f, onValueChange = {}, valueRange = 0.5f..1f)
+                        Slider(
+                            value = stabilizationStrength,
+                            onValueChange = {
+                                stabilizationStrength = it
+                                nativeLib.setStabilizationStrength(it)
+                            },
+                            valueRange = 0.5f..1f
+                        )
                     }
                     Text("Privacy Filter: ${if (isPrivacyFilterEnabled) "Active" else "Inactive"}")
                 }

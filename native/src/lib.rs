@@ -133,19 +133,22 @@ mod tests {
     fn test_initial_matrix() {
         let engine = SensorFusionEngine::new();
         let mat = engine.get_matrix();
-        assert!((mat.col(0).x - 0.85).abs() < 0.001);
-        assert!((mat.col(1).y - 0.85).abs() < 0.001);
+        // Updated to match 0.95 base_crop
+        assert!((mat.col(0).x - 0.95).abs() < 0.001);
+        assert!((mat.col(1).y - 0.95).abs() < 0.001);
         assert!((mat.col(2).z - 1.0).abs() < 0.001);
     }
 
     #[test]
     fn test_gyro_integration() {
         let mut engine = SensorFusionEngine::new();
-        engine.update_gyro(1, 0.0, 0.0, std::f32::consts::PI);
-        engine.update_gyro(1_000_000_001, 0.0, 0.0, std::f32::consts::PI);
+        // First sample at t=1 (non-zero to pass the first-run check)
+        engine.update_gyro(1, 0.0, 0.0, 0.0);
+        // Second sample at t=0.01s (10ms) later
+        engine.update_gyro(10_000_001, 0.0, 0.0, std::f32::consts::PI);
 
         let (_, _, roll) = engine.orientation.to_euler(glam::EulerRot::YXZ);
         println!("Roll: {}", roll);
-        assert!((roll.abs() - std::f32::consts::PI).abs() < 0.1);
+        assert!((roll.abs() - (std::f32::consts::PI * 0.01)).abs() < 0.001);
     }
 }
