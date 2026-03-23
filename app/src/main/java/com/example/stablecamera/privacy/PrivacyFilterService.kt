@@ -9,31 +9,35 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
-import com.example.stablecamera.privacy.PrivacyOverlayView
 import android.os.IBinder
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.core.app.NotificationCompat
+import com.example.stablecamera.privacy.PrivacyOverlayView
+import com.example.stablecamera.privacy.AppUsageMonitor
 
 class PrivacyFilterService : Service() {
     private var windowManager: WindowManager? = null
     private var overlayView: FrameLayout? = null
+    private var appUsageMonitor: AppUsageMonitor? = null
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
         startForeground(1, createNotification())
+
+        appUsageMonitor = AppUsageMonitor(this).apply {
+            start()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
-        if (action == ACTION_SHOW) {
-            showOverlay()
-        } else if (action == ACTION_HIDE) {
-            hideOverlay()
+        when (intent?.action) {
+            ACTION_SHOW -> showOverlay()
+            ACTION_HIDE -> hideOverlay()
         }
         return START_STICKY
     }
@@ -61,12 +65,22 @@ class PrivacyFilterService : Service() {
             addView(PrivacyOverlayView(context))
         }
 
-        windowManager?.addView(overlayView, params)
+        try {
+            windowManager?.addView(overlayView, params)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            overlayView = null
+        }
     }
 
     private fun hideOverlay() {
-        if (overlayView != null) {
-            windowManager?.removeView(overlayView)
+        try {
+            overlayView?.let {
+                windowManager?.removeView(it)
+                overlayView = null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
             overlayView = null
         }
     }
@@ -79,7 +93,7 @@ class PrivacyFilterService : Service() {
                 NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager?.createNotificationChannel(channel)
         }
     }
 
@@ -88,7 +102,15 @@ class PrivacyFilterService : Service() {
             .setContentTitle("Privacy Filter Active")
             .setContentText("Protecting your screen content.")
             .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+    }
+
+    override fun onDestroy() {
+        appUsageMonitor?.stop()
+        appUsageMonitor = null
+        hideOverlay()
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
