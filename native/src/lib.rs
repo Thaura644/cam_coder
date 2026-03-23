@@ -71,72 +71,36 @@ impl SensorFusionEngine {
         let stabilization_rot = Quat::from_euler(glam::EulerRot::YXZ, 0.0, -pitch, -roll);
         
         // Dynamic crop: calculate how much we've deviated from center
-        // The more we rotate, the more "black borders" would appear without cropping.
-        // For a 90% crop, we can handle ~15-20 degrees of tilt.
         let deviation = (pitch.abs().max(roll.abs())).to_degrees();
+        
+        // Use the instance's alpha as a proxy for strength if needed, or just a fixed base.
+        // For now, we'll keep the dynamic logic but respect the strength via a new field if we had one.
+        // Since we need to implement setStabilizationStrength, let's add a strength field to the engine.
         let base_crop = 0.95;
         let dynamic_crop = (base_crop - (deviation / 100.0).min(0.15)) as f32;
         
         let crop_scale = Vec3::new(dynamic_crop, dynamic_crop, 1.0);
         Mat4::from_scale(crop_scale) * Mat4::from_quat(stabilization_rot)
     }
-}
 
-#[no_mangle]
-pub extern "system" fn Java_com_example_stablecamera_NativeLib_initSensorFusion(
-    _env: JNIEnv,
-    _class: JClass,
-) {
-    android_logger::init_once(
-        Config::default().with_max_level(LevelFilter::Trace),
-    );
-    let mut engine = FUSION_ENGINE.lock().unwrap();
-    *engine = SensorFusionEngine::new();
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_example_stablecamera_NativeLib_feedGyro(
-    _env: JNIEnv,
-    _class: JClass,
-    timestamp: jlong,
-    x: jfloat,
-    y: jfloat,
-    z: jfloat,
-) {
-    if let Ok(mut engine) = FUSION_ENGINE.lock() {
-        engine.update_gyro(timestamp, x, y, z);
+    fn set_strength(&mut self, strength: f32) {
+        // Map strength (0.5 - 1.0) to our internal parameters if needed.
+        // For now, we can just log or use it to bound the crop.
+        self.alpha = strength.clamp(0.8, 0.99);
     }
 }
 
+// ... existing code ...
+
 #[no_mangle]
-pub extern "system" fn Java_com_example_stablecamera_NativeLib_feedAccel(
+pub extern "system" fn Java_com_example_stablecamera_NativeLib_setStabilizationStrength(
     _env: JNIEnv,
     _class: JClass,
-    timestamp: jlong,
-    x: jfloat,
-    y: jfloat,
-    z: jfloat,
+    strength: jfloat,
 ) {
     if let Ok(mut engine) = FUSION_ENGINE.lock() {
-        engine.update_accel(timestamp, x, y, z);
+        engine.set_strength(strength);
     }
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_example_stablecamera_NativeLib_getStabilizationMatrix(
-    env: JNIEnv,
-    _class: JClass,
-    _timestamp: jlong,
-) -> jfloatArray {
-    let array = if let Ok(engine) = FUSION_ENGINE.lock() {
-        engine.get_matrix().to_cols_array()
-    } else {
-        Mat4::IDENTITY.to_cols_array()
-    };
-
-    let output = env.new_float_array(16).unwrap();
-    env.set_float_array_region(&output, 0, &array).unwrap();
-    output.into_raw()
 }
 
 #[no_mangle]
